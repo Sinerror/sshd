@@ -1,0 +1,734 @@
+
+1.1 Настройка IP и hostname
+
+HQ-SRV
+
+nano /etc/hostname [hq-srv]
+
+nano /etc/network/interfaces
+[Вставить] 
+auto eth0
+iface ens19 inet dhcp
+
+HQ-R
+
+nano /etc/hostname [hq-r]
+
+nano /etc/network/interfaces
+[Вставить] 
+auto ens19
+iface ens19 inet static
+address 192.168.200.1
+netmask 255.255.255.192
+
+auto ens20
+iface ens20 inet static
+address 4.4.4.100
+gateway 4.4.4.1
+netmask 255.255.255.0
+
+ISP
+
+nano /etc/hostname [isp]
+
+nano /etc/network/interfaces
+[Вставить] 
+auto ens19
+iface ens19 inet static
+address 4.4.4.1
+netmask 255.255.255.0
+
+auto ens20
+iface ens20 inet static
+address 5.5.5.1
+netmask 255.255.255.0
+
+auto ens21
+iface ens21 inet static
+address 3.3.3.1
+netmask 255.255.255.0
+
+BR-R
+
+nano /etc/hostname [br-r]
+
+nano /etc/network/interfaces
+[Вставить] 
+auto ens19
+iface ens19 inet static
+address 172.16.100.1
+netmask 255.255.255.240
+
+auto ens20
+iface ens20 inet static
+address 5.5.5.100
+gateway 5.5.5.1
+netmask 255.255.255.0
+
+BR-SRV
+
+nano /etc/hostname [br-srv]
+
+nano /etc/network/interfaces
+[Вставить] 
+auto ens19
+iface ens19 inet static
+address 172.16.100.2
+gateway 172.16.100.1
+netmask 255.255.255.240
+
+CLI
+
+nano /etc/hostname [cli]
+
+nano /etc/network/interfaces
+[Вставить] 
+auto ens19
+iface ens19 inet static
+address 3.3.3.10
+gateway 3.3.3.1
+netmask 255.255.255.0
+
+
+
+1.2 Скрипт frr
+
+nano /etc/apt/sources.list
+[Закоментить строчку с deb cdrom]
+[Скопировать оставшиеся 2 строчки и убрать -security; security. заменить на  deb.]
+
+deb http://security.debian.org/debian-security bullseye-security main contrib
+deb-src http://security.debian.org/debian-security bullseye-security main contrib
+
+deb http://deb.debian.org/debian bullseye main contrib
+deb-src http://deb.debian.org/debian bullseye main contrib
+
+
+
+apt install frr
+nano /etc/frr/daemons
+[Заменить] ospfd=yes
+
+systemctl restart frr.service
+
+nano /etc/sysctl.conf
+[Заменить/Вставить] net.ipv4.ip_forward = 1
+
+--Скрипт--
+
+[HQ-R]
+nano /frr
+
+#!/bin/bash
+echo conf t > tmp.l
+echo router ospf vrf default >> tmp.l
+echo network 192.168.200.0/26 area 0 >> tmp.l
+echo network 4.4.4.0/24 area 0 >> tmp.l
+
+cat tmp.l | vtysh
+
+[ISP]
+nano /frr
+
+#!/bin/bash
+echo conf t > tmp.l
+echo router ospf vrf default >> tmp.l
+echo network 3.3.3.0/24 area 0 >> tmp.l
+echo network 4.4.4.0/24 area 0 >> tmp.l
+echo network 5.5.5.0/24 area 0 >> tmp.l
+
+cat tmp.l | vtysh
+
+[BR-R]
+nano /frr
+
+#!/bin/bash
+echo conf t > tmp.l
+echo router ospf vrf default >> tmp.l
+echo network 172.16.100.1/28 area 0 >> tmp.l
+echo network 5.5.5.0/24 area 0 >> tmp.l
+
+cat tmp.l | vtysh
+
+[Для всех]
+chmod +x /frr
+
+/frr
+
+systemctl restart frr.service
+
+sysctl -w net.ipv4.ip_forward=1 (на всякий случай)
+
+
+1.3 DHCP Для HQ-SRV
+
+(HQ-R)
+apt install isc-dhcp-server
+
+nano /etc/default/isc-dhcp-server 
+[Заменить] INTERFACESv4="ens19"
+
+nano /etc/dhcp/dhcpd.conf
+subnet 192.168.200.0 netmask 255.255.255.192 {
+  range 192.168.200.2 192.168.200.62; # Пул адресов
+  option routers 192.168.200.1; # Указываем что шлюзом будет сам роутер
+}
+
+(HQ-SRV)
+ip -br link (Смотрим ens19)
+
+(HQ-R)
+nano /etc/dhcp/dhcpd.conf
+host hq-srv {
+  hardware ethernet <mac_адрес>;
+  fixed-address 192.168.200.3; # выделенный IP-адрес
+}
+
+systemctl restart isc-dhcp-server.service
+
+1.4 User ы
+
+nano /fix
+[Текст Фикс скрипта]
+
+chmod +x /fix
+
+HQ-SRV
+adduser Admin --force-badname
+ИЛИ
+useradd Admin
+
+HQ-R
+adduser Admin --force-badname
+adduser Network_Admin --force-badname
+ИЛИ
+useradd Admin
+useradd Network_Admin
+
+CLI
+adduser Admin --force-badname
+ИЛИ
+useradd Admin
+
+BR-R
+adduser Branch_Admin --force-badname
+adduser Network_Admin --force-badname
+ИЛИ
+useradd Branch_Admin
+useradd Network_Admin
+
+BR-SRV
+adduser Branch_Admin --force-badname
+adduser Network_Admin --force-badname
+ИЛИ
+useradd Branch_Admin
+useradd Network_Admin
+
+
+
+
+
+1.5 iperf3
+
+apt install iperf3
+
+Проверка:
+
+(HQ-R)
+iperf3 -s	
+
+(HQ-SRV)
+iperf3 -c 192.168.200.1
+
+ 1.7 Перенаправление 2222 на HQ-SRV:22
+
+(HQ-SRV + HQ-R)
+apt install openssh-server
+
+nano /etc/ssh/sshd_config
+[Заменить] PermitRootLogin yes
+
+systemctl restart sshd.service
+
+(HQ-R)
+nano /etc/nftables.conf
+
+table ip nat {
+	chain prerouting {
+		type nat hook prerouting priority dstnat; policy accept;
+		iifname “ens20” tcp dport 2222 dnat to 192.168.200.3:22
+	}
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+		#oifname “ens20” masquerade
+	}
+}
+
+modprobe nft_nat
+
+systemctl start nftables.service
+systemctl enable nftables.service
+
+1.8 Запретить доступ с CLI
+
+(HQ-SRV)
+nano /etc/ssh/sshd_config
+[Добавить]
+Match Address 3.3.3.10
+    DenyUsers *
+
+systemctl restart sshd.service.
+
+2.0 GRE тунель
+
+(HQ-R)
+nano /etc/network/interfaces
+[Добавить]
+auto gre1
+ iface gre1 inet tunnel
+ address 10.10.10.1
+ netmask 255.255.255.252
+ mode gre
+ local 4.4.4.100
+ endpoint 5.5.5.100
+ ttl 255
+
+systemctl restart networking
+
+(BR-R)
+nano /etc/network/interfaces
+[Добавить]
+auto gre1
+  iface gre1 inet tunnel
+  address 10.10.10.2
+  netmask 255.255.255.252
+  mode grenan
+  local 5.5.5.10a0
+  endpoint 4.4.4.100
+  ttl 255
+
+systemctl restart networking
+2.1 DNS-сервер (HQ-SRV)
+
+
+
+apt install bind9
+
+cd /etc/bind
+cp db.local db.hq.work # прямая зона hq.work
+cp db.local db.branch.work # прямая зона branch.work
+cp db.local db.192.168.200 # обратная зона для сети 192.168.200.0
+cp db.local db.4.4.4 # обратная зона для сети 4.4.4.0
+cp db.local db.5.5.5 # обратная зона для сети 5.5.5.0
+
+
+
+$TTL	604800
+@	IN 	SOA	hq-srv.hq.work. root.hq.work. (
+				2	; Serial
+			604800	; Refresh
+			86400		; Retry
+			2419200	; Expire
+			604800 )	; Negative Cache TTL
+@	IN	NS	hq-srv.hq.work.
+hq-r	IN	A	4.4.4.100
+hq-srv	IN	A	192.168.200.3
+
+
+
+
+	 	 	 	Конфигурация /etc/bind/db.hq.work
+
+
+
+$TTL	604800
+@	IN 	SOA	br-srv.hq.work. root.branch.work. (
+				2	; Serial
+			604800	; Refresh
+			86400		; Retry
+			2419200	; Expire
+			604800 )	; Negative Cache TTL
+@	IN	NS	br-srv.branch.work.
+hq-r	IN	A	5.5.5.100
+hq-srv	IN	A	172.16.100.2
+
+
+
+	 	 	 	Конфигурация /etc/bind/db.branch.work
+
+
+
+$TTL	604800
+@	IN 	SOA	hq-srv.hq.work. root.hq.work. (
+				2	; Serial
+			604800	; Refresh
+			86400		; Retry
+			2419200	; Expire
+			604800 )	; Negative Cache TTL
+@	IN	NS	hq-srv.hq.work.
+3	IN	PTR	hq-srv.hq.work.
+
+	 	 	 	Конфигурация /etc/bind/db.192.168.200
+
+
+$TTL	604800
+@	IN 	SOA	hq-srv.hq.work. root.hq.work. (
+				2	; Serial
+			604800	; Refresh
+			86400		; Retry
+			2419200	; Expire
+			604800 )	; Negative Cache TTL
+@	IN	NS	hq-srv.hq.work.
+100	IN	PTR	hq-srv.hq.work.
+
+	 	 	 	Конфигурация /etc/bind/db.4.4.4
+
+
+
+$TTL	604800
+@	IN 	SOA	br-srv.hq.work. root.branch.work. (
+				2	; Serial
+			604800	; Refresh
+			86400		; Retry
+			2419200	; Expire
+			604800 )	; Negative Cache TTL
+@	IN	NS	br-srv.branch.work.
+100	IN	PTR	br-srv.branch.work.
+
+	 	 	 	Конфигурация /etc/bind/db.5.5.5
+
+
+nano /etc/bind/named.conf.default-zones
+
+
+
+zone “255.in-addr.arpa” {
+	type master;
+	file “/etc/bind/db.255”;
+};
+zone “hq.work” {
+	type master;
+	file “/etc/bind/db.hq.work”;
+};
+zone “branch.work” {
+	type master;
+	file “/etc/bind/db.branch.work”;
+};
+zone “4.4.4.in-addr.arpa” {
+	type master;
+	file “/etc/bind/db.4.4.4”;
+};
+zone “5.5.5.in-addr.arpa” {
+	type master;
+	file “/etc/bind/db.5.5.5”;
+};
+zone “200.168.192.in-addr.arpa” {
+	type master;
+	file “/etc/bind/db.200.168.192”;
+};
+
+
+systemctl restart bind9.service
+
+(Все машины (В ТОМ ЧИСЛЕ HQ-SRV))
+ping 192.168.200.3 - Проверяем пинг с HQ-SRV
+nano /etc/resolv.conf
+nameserver 192.168.200.3
+
+
+2.2 NTP Сервер на HQ-R
+
+(Все машины)
+apt install chrony
+
+(HQ-R)
+nano /etc/chrony/chrony.conf
+[Заменить]
+server 4.4.4.100
+allow 0.0.0.0/0
+local stratum 5
+confdir /etc/chrony/conf.d
+sourcedir /etc/chrony/sources.d
+keyfile /etc/chrony/chrony.keys
+driftfile /var/lib/chrony/chrony.drift
+logdir /var/log/chrony
+maxupdateskew 100.0
+rtcsync
+makestep 1 3
+
+ systemctl restart chrony.service
+(Все остальные)
+nano /etc/chrony/chrony.conf
+[Заменить]
+server 4.4.4.100
+confdir /etc/chrony/conf.d
+sourcedir /etc/chrony/sources.d
+keyfile /etc/chrony/chrony.keys
+driftfile /var/lib/chrony/chrony.drift
+logdir /var/log/chrony
+maxupdateskew 100.0
+rtcsync
+makestep 1 3
+
+ systemctl restart chrony.service
+
+chronyc sources - Проверка
+
+(Все)
+timedatectl set-timezone Europe/Moscow
+2.3 Поднятия домена 
+
+[Методичка]
+
+(hq-srv)
+nano /etc/hosts
+
+127.0.0.1 	localhost
+172.16.0.16 	hq-srv.hq.work		dc0
+
+apt install apache2 php php-cgi libapache2-mod-php php-mbstring php-common php-pear
+apt install slapd ldap-utils
+
+Пароли все - 1
+
+apt install ldap-account-manager
+
+a2enconf php*-cgi
+
+systemctl restart apache2
+systemctl enable apache2
+
+http://localhost/lam  или  http://192.168.200.3/lam
+
+Далее всё пока по гайду
+[вставить гайд]
+
+
+(Другие машины (Успешные тесты на HQ-R))
+ping 192.168.200.3
+
+apt install libnss-ldap libpam-ldap ldap-utils nscd
+
+ldap://192.168.200.3:389 - ldap server
+
+dc=hq,dc=work, 3 версия
+
+cn=admin,dc=hq,dc=work
+
+requre login=no
+
+cn=admin,dc=hq,dc=work
+
+nano /etc/nsswitch.conf
+passwd:	compat systemd ldap
+group:		compat systemd ldap
+shadow: compat
+
+[вставить остальное]
+
+
+2.4 SMB Сервер (HQ-SRV)
+
+apt install samba
+
+mkdir /share
+mkdir /share/Branch_Files
+mkdir /share/Network
+mkdir /share/Admin_Files
+
+adduser admin
+adduser branch_admin
+adduser network_admin
+
+smbpasswd -a admin (Обратите внимание на регистр первой буквы)
+smbpasswd -a branch_admin 
+smbpasswd -a network_admin 
+
+nano /etc/samba/smb.conf
+[Добавить]
+
+[Branch_Files]
+path =/share/Branch_Files
+valid users = branch_admin
+read only = no
+browsable = yes
+
+[Network]
+path =/share/Network
+valid users = network_admin
+read only = no
+browsable = yes
+
+[Admin_Files]
+path = /share/Admin_Files
+valid users = admin
+read only = no
+browsable = yes
+
+systemctl restart smbd.service
+
+(Клиенты)
+apt install smbclient
+smbclient //192.168.200.3/Admin_Files –user admin
+
+
+2.6 mediawiki 
+
+apt install docker.io docker-compose
+
+mkdir /root/mediawiki
+cd /root/mediawiki
+nano docker-compose.yml
+
+version: ‘3’
+services:
+ mediawiki:
+  image: mediawiki
+  restart: always
+  ports:
+   - 8080:80
+  volumes:
+   - image:/var/www/html/image
+   - /root/LocalSettings.php:/var/www/html/LocalSettings.php
+ database:
+  image: mariadb
+  restart: always
+  environment:
+   MYSQL_DATABASE: mediawiki
+   MYSQL_USER: wiki
+   MYSQL_PASSWORD: P@ssw0rd
+   MYSQL_RANDOM_ROOT_PASSWORD: ‘yes’
+  volumes:
+   - db_volume:/var/lib/mysql
+volumes:
+ image:
+ db_volume:
+
+
+3.0 RAID 5 Массив
+
+apt install  mdadm
+
+lsblk
+
+fdisk /dev/sdb
+n
+(Тыкаем энтер)
+w
+mkfs -t ext4 /dev/sdb1
+
+fdisk /dev/sdc
+n
+(Тыкаем энтер)
+w
+mkfs -t ext4 /dev/sdc1
+…
+
+mdadm --create /dev/md0 --level=5 --raid-devices=3 /dev/sdc /dev/sdb /dev/sdd
+
+cat /proc/mdstat
+
+mkfs -t ext4 /dev/md0
+mkdir /mnt/md
+mount /dev/md0 /mnt/md
+
+echo "/dev/md0 /mnt/md ext4 defaults 0 0" >> /etc/fstab
+
+systemctl daemon-reload
+lsblk
+
+
+3.1 Мониторинг средствами rsyslog
+
+[HQ-SRV]
+apt install rsyslog
+cp /etc/rsyslog.conf /etc/rsyslog.conf.bak - Резервная копия
+
+nano /etc/rsyslog.conf
+[Откоментить]
+	module(load=»imudp»)
+	input(type=»imudp» port=»514?)
+
+	module(load=»imtcp»)
+	input(type=»imtcp» port=»514?)
+[Добавить в конец файла]
+$template remote-incoming-logs,"/var/log/%HOSTNAME%/%PROGRAMNAME%.log"
+*.* ?remote-incoming-logs
+
+systemctl restart rsyslog
+
+[Остальные]
+nano /etc/rsyslog.conf
+[Добавить в конец файла]
+*.* @192.168.200.3:514
+*.* @@192.168.200.3:514
+$ActionQueueFileName queue
+$ActionQueueMaxDiskSpace 2g
+$ActionQueueSaveOnShutdown on
+$ActionQueueType LinkedList
+$ActionResumeRetryCount -1
+
+systemctl restart rsyslog
+
+3.2 SSH Сертификаты
+
+ssh-keygen -t rsa
+
+(Везде куда можно подключится)
+nano /etc/ssh/sshd_config
+[Заменить] PermitRootLogin yes
+
+ssh-copy-id root@192.168.200.3
+
+nano /etc/ssh/sshd_config
+[Заменить] PasswordAuthentication no
+3.3 Безопасный ссш
+
+nano /etc/ssh/sshd-banner
+[Вставить] Authorized access only!
+
+nano /etc/ssh/sshd_config:
+[Добавить] 
+Banner /etc/ssh/sshd-banner
+PermitRootLogin no
+PasswordAuthentication no
+Port <номер_порта> (Случайный порт, главное его не забыть)
+MaxAuthTries 4
+PasswordAuthentication no
+LoginGraceTime 5m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+FAQ
+
+Инет не робит що делатц?
+Проверить ip a
+Если всё норм то делаем:
+ip route delete 0.0.0.0/0
+ip route add 0.0.0.0/0 via 172.16.1.1
+Если не помогает, то пусть Господь будет милостив над вами
+
+Команда не работает
+su -
+/fix (пункт 1.4)
+ установлена ли она у вас вообще?
+
+
+
+
+https://setiwik.ru/tsentralizovannoe-upravlenie-zhurnalami-s-pomoschyu-ustanovki-rsyslog-na-debian-11/
